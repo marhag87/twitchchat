@@ -1,3 +1,6 @@
 requests
 pyyamlconfig
 python-dateutil
+flask
+flask_socketio
+socketIO-client

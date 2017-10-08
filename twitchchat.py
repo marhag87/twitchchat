@@ -7,6 +7,7 @@ import socket
 import json
 from pyyamlconfig import load_config
 from pathlib import Path
+from socketIO_client import SocketIO
 
 
 def get_playback_time(sock):
@@ -44,26 +45,44 @@ response = requests.get(url, headers=headers).json()
 comments = response.get('comments')
 cursor = response.get('_next')
 done = False
-while comments:
-    if len(comments) < 15 and not done:
-        url = f'https://api.twitch.tv/v5/videos/{video}/comments?cursor={cursor}'
-        response = requests.get(url, headers=headers).json()
-        new_comments = response.get('comments')
-        if new_comments is None:
-            done = True
-        else:
-            comments.extend(response.get('comments'))
-            cursor = response.get('_next')
-    comment = comments.pop(0)
-    body = comment.get('message').get('body')
-    author = comment.get('commenter').get('display_name')
-    content_offset_seconds = comment.get('content_offset_seconds')
-    printed = False
-    while not printed:
-        offset = get_playback_time(client)
-        if offset is not None and content_offset_seconds < offset:
-            print(f'{author}: {body}')
-            printed = True
+with SocketIO('localhost', 5000) as socketIO:
+    while comments:
+        if len(comments) < 15 and not done:
+            url = f'https://api.twitch.tv/v5/videos/{video}/comments?cursor={cursor}'
+            response = requests.get(url, headers=headers).json()
+            new_comments = response.get('comments')
+            if new_comments is None:
+                done = True
+            else:
+                comments.extend(response.get('comments'))
+                cursor = response.get('_next')
+        comment = comments.pop(0)
+        text_body = comment.get('message').get('body')
+        author = comment.get('commenter').get('display_name')
+        body = ""
+        fragments = comment.get('message').get('fragments')
+        for fragment in fragments:
+            emoticon = fragment.get('emoticon')
+            if emoticon is None:
+                body = f'{body}<span>{fragment.get("text")}</span>'
+            else:
+                emoticon_id = emoticon.get('emoticon_id')
+                emoticon_text = fragment.get('text')
+                body = f'''{body}
+                    <div class="tw-tooltip-wrapper inline" data-a-target="emote-name">
+                        <img class="chat-line__message--emote" src="https://static-cdn.jtvnw.net/emoticons/v1/{emoticon_id}/1.0" alt="{emoticon_text}">
+                        <div class="tw-tooltip tw-tooltip--up tw-tooltip--align-center" data-a-target="tw-tooltip-label" style="margin-bottom: 0.9rem;">
+                            {emoticon_text}
+                        </div>
+                    </div>
+                '''
+        content_offset_seconds = comment.get('content_offset_seconds')
+        printed = False
+        while not printed:
+            offset = get_playback_time(client)
+            if offset is not None and content_offset_seconds < offset:
+                socketIO.send({'author': author, 'body': body})
+                printed = True
         sleep(0.1)
 
 client.close()

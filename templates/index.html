@@ -1,0 +1,54 @@
+<!doctype html>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.4.5/socket.io.min.js"></script>
+<script type="text/javascript" src="http://code.jquery.com/jquery-1.11.1.min.js"></script>
+<script type="text/javascript" src="static/jquery.visible.min.js"></script>
+<script type="text/javascript">
+    $(document).ready(function() {
+        var socket = io.connect('http://' + document.domain + ':' + location.port);
+
+        socket.on('message', function(msg) {
+            $("#chatlog").append(`
+              <li class="full-width ">
+                <div class="vod-message full-width align-items-start flex flex-nowrap pd-05">
+                  <div class="vod-message__header flex flex-shrink-0 align-right">
+                    <div class="tw-tooltip-wrapper inline-flex">
+                      <button class="vod-message__timestamp mg-r-05 pd-x-05"></button>
+                    </div>
+                  </div>
+                  <div class="full-width ">
+                    <div class="align-items-start flex flex-nowrap">
+                      <div class="flex-grow-1">
+                        <span class="video-chat__message-author" style="color: rgb(210, 210, 210);">` + msg.author + `</span>
+                        <div data-test-selector="comment-message-selector" class="video-chat__message inline">
+                          <span class="pd-x-05">:</span>
+                          <span class="qa-mod-message">
+                          ` + msg.body + `
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            `);
+            while ($('#chatlog li').last().visible() === false) {
+                $('#chatlog li').first().remove();
+            }
+        });
+    });
+</script>
+<link rel="stylesheet" href="https://player.twitch.tv/css/player.css">
+<link rel="stylesheet" href="https://web-cdn.ttvnw.net/styles/application-0fa6ef9268e043c023dfea86aeff7a02.css">
+<link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv.css?v=7.0.29">
+<link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv-dark.css?v=7.0.29">
+<link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv-hide-recommended-channels.css?v=7.0.29">
+<link rel="stylesheet" href="https://web-cdn.ttvnw.net/styles/twilight/core-4a4a70c7c2b9d9ebcbcad1b8c739ad36.css">
+<style>
+    body {
+        overflow:hidden;
+    }
+</style>
+<title>Twitch chat</title>
+<div class=page>
+    <ul id="chatlog" class="full-width align-items-end flex" style="min-height: 0px;"></ul>
+</div>
