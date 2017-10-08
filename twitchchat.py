@@ -10,7 +10,10 @@ from pathlib import Path
 
 
 def get_playback_time(sock):
-    sock.send(b'{ "command": ["get_property", "playback-time"] }\n')
+    try:
+        sock.send(b'{ "command": ["get_property", "playback-time"] }\n')
+    except BrokenPipeError:
+        sys.exit(1)
     try:
         sock_response = sock.recv(4096)
         message = json.loads(sock_response)
@@ -30,19 +33,27 @@ except IndexError:
 headers = {'Client-ID': clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
 
 client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-client.connect(socket_file)
+try:
+    client.connect(socket_file)
+except ConnectionRefusedError:
+    sys.exit(1)
 offset = get_playback_time(client)
 
 url = f'https://api.twitch.tv/v5/videos/{video}/comments?content_offset_seconds={offset}'
 response = requests.get(url, headers=headers).json()
 comments = response.get('comments')
 cursor = response.get('_next')
+done = False
 while comments:
-    if len(comments) < 15:
+    if len(comments) < 15 and not done:
         url = f'https://api.twitch.tv/v5/videos/{video}/comments?cursor={cursor}'
         response = requests.get(url, headers=headers).json()
-        comments.extend(response.get('comments'))
-        cursor = response.get('_next')
+        new_comments = response.get('comments')
+        if new_comments is None:
+            done = True
+        else:
+            comments.extend(response.get('comments'))
+            cursor = response.get('_next')
     comment = comments.pop(0)
     body = comment.get('message').get('body')
     author = comment.get('commenter').get('display_name')
