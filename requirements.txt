@@ -4,3 +4,4 @@ python-dateutil
 flask
 flask_socketio
 socketIO-client
+asyncio

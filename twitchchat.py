@@ -81,7 +81,31 @@ with SocketIO('localhost', 5000) as socketIO:
         while not printed:
             offset = get_playback_time(client)
             if offset is not None and content_offset_seconds < offset:
-                socketIO.send({'author': author, 'body': body})
+                socketIO.send(
+                    {
+                        'body': f'''
+<div class="vod-message full-width align-items-start flex flex-nowrap pd-05">
+    <div class="vod-message__header flex flex-shrink-0 align-right">
+        <div class="tw-tooltip-wrapper inline-flex">
+            <button class="vod-message__timestamp mg-r-05 pd-x-05"></button>
+        </div>
+    </div>
+    <div class="full-width ">
+        <div class="align-items-start flex flex-nowrap">
+            <div class="flex-grow-1">
+                <span class="video-chat__message-author" style="color: rgb(210, 210, 210);">{author}</span>
+                <div data-test-selector="comment-message-selector" class="video-chat__message inline">
+                    <span class="pd-x-05">:</span>
+                    <span class="qa-mod-message">
+                        {body}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>'''
+                    }
+                )
                 printed = True
         sleep(0.1)
 

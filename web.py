@@ -25,7 +25,6 @@ def index():
 def handle_message(json):
     send(
         {
-            'author': json.get('author'),
             'body': json.get('body'),
         },
         broadcast=True,
