@@ -55,10 +55,7 @@ class Chat:
     async def get_initial_messages(self):
         while self.playback_time is None:
             await asyncio.sleep(1)
-        if self.fetching_messages:
-            return
-        else:
-            await self.get_messages(f'content_offset_seconds={self.playback_time}')
+        await self.get_messages(f'content_offset_seconds={self.playback_time}')
 
     async def get_messages_loop(self):
         while self.playback_time is None:
@@ -71,6 +68,8 @@ class Chat:
                 await self.get_messages(f'cursor={self.cursor}')
 
     async def get_messages(self, url):
+        if self.fetching_messages:
+            return
         self.fetching_messages = True
         url = f'https://api.twitch.tv/v5/videos/{self.video}/comments?{url}'
         response = requests.get(url, headers=self.headers).json()
