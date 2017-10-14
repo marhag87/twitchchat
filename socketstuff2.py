@@ -27,6 +27,7 @@ class Chat:
         self.cursor = None
         self.fetching_messages = False
         self.messages = []
+        self.message_queue = []
         self.clientid = self.config.get('clientid')
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
         self.video = '182057410'
@@ -39,8 +40,9 @@ class Chat:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.websocket.disconnect()
 
-    def _message(self, message: str):
+    def _message(self, message: str, message_id: str):
         self.websocket.send({'body': message})
+        self.message_queue[:] = [d for d in self.message_queue if d.get('message_id') != message_id]
 
     def start(self):
         self.playback_time_task = loop.create_task(self.get_play_time())
@@ -55,6 +57,9 @@ class Chat:
             self.get_messages_task.cancel()
         if self.queue_messages_task is not None:
             self.queue_messages_task.cancel()
+        for item in self.message_queue:
+            item.get('event').cancel()
+        self.message_queue = []
 
     async def get_initial_messages(self):
         while self.playback_time is None:
@@ -66,7 +71,7 @@ class Chat:
             await asyncio.sleep(1)
         while True:
             if self.last_offset - self.playback_time > 10:
-                print(f'last_offset: {self.last_offset}, playback_time: {self.playback_time}, diff: {self.last_offset - self.playback_time}, len: {len(self.messages)}')
+                print(f'last_offset: {self.last_offset}, playback_time: {self.playback_time}, diff: {self.last_offset - self.playback_time}, len: {len(self.message_queue)}')
                 sleeptime = self.last_offset - self.playback_time - 9
                 print(f'sleeping for {sleeptime}s')
                 await asyncio.sleep(sleeptime)
@@ -143,6 +148,7 @@ class Chat:
     </div>
 </div>'''
             parsed.append({
+                'message_id': comment.get('_id'),
                 'offset': comment.get('content_offset_seconds'),
                 'body': fullbody,
             })
@@ -156,12 +162,19 @@ class Chat:
             pbt = message.get('offset') if self.playback_time is None else self.playback_time
             offset = message.get('offset') - pbt
             body = message.get('body')
+            message_id = message.get('message_id')
             if offset < 0:
                 offset = 0
-            loop.call_later(
-                offset,
-                self._message,
-                f'{body}',
+            self.message_queue.append(
+                {
+                    'message_id': message_id,
+                    'event': loop.call_later(
+                        offset,
+                        self._message,
+                        f'{body}',
+                        message_id,
+                    ),
+                }
             )
             #print(f'created call for "{commenter}: {body}" in {offset}s ({message.get("offset")})')
 
@@ -186,7 +199,6 @@ class Chat:
         while True:
             self.writer.write(b'{ "command": ["get_property", "playback-time"], "request_id": "playback-time" }\n')
             await asyncio.sleep(1)
-
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
