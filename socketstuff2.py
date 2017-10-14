@@ -19,6 +19,7 @@ class Chat:
         self.websocket = SocketIO('localhost', 5000)
         self.writer.write(b'{ "command": ["observe_property", 1, "core-idle"] }\n')
         self.writer.write(b'{ "command": ["get_property", "core-idle"], "request_id": "core-idle" }\n')
+        self.writer.write(b'{ "command": ["get_property", "title"], "request_id": "title" }\n')
         loop.create_task(self.handle_data())
         self.playback_time_task = None
         self.get_messages_task = None
@@ -30,9 +31,10 @@ class Chat:
         self.message_queue = []
         self.clientid = self.config.get('clientid')
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        self.video = '182057410'
+        self.video = None
         self.last_offset = 0
         self.bttv_emotes = requests.get('https://api.betterttv.net/2/emotes/').json().get('emotes')
+        # TODO: Get channel name from api once we have the video string
         channel_emotes = requests.get('https://api.betterttv.net/2/channels/moonmoon_ow').json().get('emotes')
         if channel_emotes is not None:
             self.bttv_emotes.extend(channel_emotes)
@@ -82,6 +84,8 @@ class Chat:
         if self.fetching_messages:
             return
         self.fetching_messages = True
+        while self.video is None:
+            await asyncio.sleep(1)
         url = f'https://api.twitch.tv/v5/videos/{self.video}/comments?{url}'
         response = requests.get(url, headers=self.headers).json()
         comments = response.get('comments')
@@ -192,6 +196,8 @@ class Chat:
                     self.stop()
             elif request_id == 'playback-time':
                 self.playback_time = message.get('data')
+            elif request_id == 'title':
+                self.video = message.get('data')
             else:
                 print(message)
 
