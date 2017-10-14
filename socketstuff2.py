@@ -20,7 +20,7 @@ class Chat:
         self.writer.write(b'{ "command": ["observe_property", 1, "core-idle"] }\n')
         self.writer.write(b'{ "command": ["get_property", "core-idle"], "request_id": "core-idle" }\n')
         self.writer.write(b'{ "command": ["get_property", "title"], "request_id": "title" }\n')
-        loop.create_task(self.handle_data())
+        self.loop.create_task(self.handle_data())
         self.playback_time_task = None
         self.get_messages_task = None
         self.queue_messages_task = None
@@ -47,10 +47,10 @@ class Chat:
         self.message_queue[:] = [d for d in self.message_queue if d.get('message_id') != message_id]
 
     def start(self):
-        self.playback_time_task = loop.create_task(self.get_play_time())
-        self.queue_messages_task = loop.create_task(self.queue_messages())
-        loop.create_task(self.get_initial_messages())
-        self.get_messages_task = loop.create_task(self.get_messages_loop())
+        self.playback_time_task = self.loop.create_task(self.get_play_time())
+        self.queue_messages_task = self.loop.create_task(self.queue_messages())
+        self.loop.create_task(self.get_initial_messages())
+        self.get_messages_task = self.loop.create_task(self.get_messages_loop())
 
     def stop(self):
         if self.playback_time_task is not None:
@@ -172,7 +172,7 @@ class Chat:
             self.message_queue.append(
                 {
                     'message_id': message_id,
-                    'event': loop.call_later(
+                    'event': self.loop.call_later(
                         offset,
                         self._message,
                         f'{body}',
@@ -207,6 +207,6 @@ class Chat:
             await asyncio.sleep(1)
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    chat = Chat(loop)
-    loop.run_forever()
+    async_loop = asyncio.get_event_loop()
+    chat = Chat(async_loop)
+    async_loop.run_forever()
