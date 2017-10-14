@@ -81,9 +81,6 @@ class Chat:
         response = requests.get(url, headers=self.headers).json()
         comments = response.get('comments')
         self.cursor = response.get('_next')
-        print(response)
-        print(url)
-        print(self.playback_time)
         self.messages.extend(await self.parse_comments(comments))
         self.last_offset = max([x['offset'] for x in self.messages])
         await self.queue_messages()
@@ -158,7 +155,6 @@ class Chat:
             message = self.messages.pop()
             pbt = message.get('offset') if self.playback_time is None else self.playback_time
             offset = message.get('offset') - pbt
-            commenter = message.get('commenter')
             body = message.get('body')
             if offset < 0:
                 offset = 0
