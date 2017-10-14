@@ -31,6 +31,10 @@ class Chat:
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
         self.video = '182057410'
         self.last_offset = 0
+        self.bttv_emotes = requests.get('https://api.betterttv.net/2/emotes/').json().get('emotes')
+        channel_emotes = requests.get('https://api.betterttv.net/2/channels/moonmoon_ow').json().get('emotes')
+        if channel_emotes is not None:
+            self.bttv_emotes.extend(channel_emotes)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.websocket.disconnect()
@@ -85,15 +89,31 @@ class Chat:
         await self.queue_messages()
         self.fetching_messages = False
 
-    @staticmethod
-    async def parse_comments(comments):
+    def parse_bttv(self, text):
+        for emote in self.bttv_emotes:
+            code = emote.get('code')
+            text = text.replace(
+                code,
+                f'<img src="">'
+                f'''<div class="tw-tooltip-wrapper inline" data-a-target="emote-name">
+                        <img class="chat-line__message--emote" src="https://cdn.betterttv.net/emote/{emote.get("id")}/1x">
+                        <div class="tw-tooltip tw-tooltip--up tw-tooltip--align-center" data-a-target="tw-tooltip-label" style="margin-bottom: 0.9rem;">
+                            {code}
+                        </div>
+                    </div>
+                '''
+            )
+        return text
+
+    async def parse_comments(self, comments):
         parsed = []
         for comment in comments:
             fragments = comment.get('message').get('fragments')
             for fragment in fragments:
                 emoticon = fragment.get('emoticon')
                 if emoticon is None:
-                    body = f'<span>{fragment.get("text")}</span>'
+                    bttv_parsed = self.parse_bttv(fragment.get('text'))
+                    body = f'<span>{bttv_parsed}</span>'
                 else:
                     emoticon_id = emoticon.get('emoticon_id')
                     emoticon_text = fragment.get('text')
@@ -147,7 +167,7 @@ class Chat:
                 self._message,
                 f'{body}',
             )
-            print(f'created call for "{commenter}: {body}" in {offset}s ({message.get("offset")})')
+            #print(f'created call for "{commenter}: {body}" in {offset}s ({message.get("offset")})')
 
     async def handle_data(self):
         while True:
