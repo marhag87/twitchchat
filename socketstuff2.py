@@ -8,28 +8,28 @@ from pathlib import Path
 
 class Chat:
     def __init__(self, loop):
+        self.home = Path.home()
+        self.config = load_config(f'{self.home}/.config/twitchchat.yaml')
         self.loop = loop
         self.reader, self.writer = self.loop.run_until_complete(
             asyncio.open_unix_connection(
-                '/var/tmp/streamlink.socket',
+                self.config.get('socket'),
             )
         )
         self.websocket = SocketIO('localhost', 5000)
         self.writer.write(b'{ "command": ["observe_property", 1, "core-idle"] }\n')
         self.writer.write(b'{ "command": ["get_property", "core-idle"], "request_id": "core-idle" }\n')
         loop.create_task(self.handle_data())
-        self.playing_task = None
         self.playback_time_task = None
         self.get_messages_task = None
+        self.queue_messages_task = None
         self.playback_time = None
         self.cursor = None
         self.fetching_messages = False
         self.messages = []
-        self.home = Path.home()
-        self.config = load_config(f'{self.home}/.config/twitchchat.yaml')
         self.clientid = self.config.get('clientid')
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        self.video = '181656394'
+        self.video = '182057410'
         self.last_offset = 0
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -39,18 +39,18 @@ class Chat:
         self.websocket.send({'body': message})
 
     def start(self):
-        self.playing_task = loop.create_task(self.print_playing())
         self.playback_time_task = loop.create_task(self.get_play_time())
-        loop.create_task(self.queue_messages())
-        loop.create_task(self.get_initial_messages())
+        self.queue_messages_task = loop.create_task(self.queue_messages())
         loop.create_task(self.get_initial_messages())
         self.get_messages_task = loop.create_task(self.get_messages_loop())
 
     def stop(self):
-        if self.playing_task is not None:
-            self.playing_task.cancel()
+        if self.playback_time_task is not None:
             self.playback_time_task.cancel()
+        if self.get_messages_task is not None:
             self.get_messages_task.cancel()
+        if self.queue_messages_task is not None:
+            self.queue_messages_task.cancel()
 
     async def get_initial_messages(self):
         while self.playback_time is None:
@@ -63,7 +63,9 @@ class Chat:
         while True:
             if self.last_offset - self.playback_time > 10:
                 print(f'last_offset: {self.last_offset}, playback_time: {self.playback_time}, diff: {self.last_offset - self.playback_time}, len: {len(self.messages)}')
-                await asyncio.sleep(5)
+                sleeptime = self.last_offset - self.playback_time - 9
+                print(f'sleeping for {sleeptime}s')
+                await asyncio.sleep(sleeptime)
             else:
                 await self.get_messages(f'cursor={self.cursor}')
 
@@ -87,10 +89,45 @@ class Chat:
     async def parse_comments(comments):
         parsed = []
         for comment in comments:
+            fragments = comment.get('message').get('fragments')
+            for fragment in fragments:
+                emoticon = fragment.get('emoticon')
+                if emoticon is None:
+                    body = f'<span>{fragment.get("text")}</span>'
+                else:
+                    emoticon_id = emoticon.get('emoticon_id')
+                    emoticon_text = fragment.get('text')
+                    body = f'''<div class="tw-tooltip-wrapper inline" data-a-target="emote-name">
+                            <img class="chat-line__message--emote" src="https://static-cdn.jtvnw.net/emoticons/v1/{emoticon_id}/1.0" alt="{emoticon_text}">
+                            <div class="tw-tooltip tw-tooltip--up tw-tooltip--align-center" data-a-target="tw-tooltip-label" style="margin-bottom: 0.9rem;">
+                                {emoticon_text}
+                            </div>
+                        </div>
+                    '''
+            fullbody = f'''
+<div class="vod-message full-width align-items-start flex flex-nowrap pd-05">
+    <div class="vod-message__header flex flex-shrink-0 align-right">
+        <div class="tw-tooltip-wrapper inline-flex">
+            <button class="vod-message__timestamp mg-r-05 pd-x-05"></button>
+        </div>
+    </div>
+    <div class="full-width ">
+        <div class="align-items-start flex flex-nowrap">
+            <div class="flex-grow-1">
+                <span class="video-chat__message-author" style="color: rgb(210, 210, 210);">{comment.get('commenter').get('display_name')}</span>
+                <div data-test-selector="comment-message-selector" class="video-chat__message inline">
+                    <span class="pd-x-05">:</span>
+                    <span class="qa-mod-message">
+                        {body}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>'''
             parsed.append({
                 'offset': comment.get('content_offset_seconds'),
-                'commenter': comment.get('commenter').get('display_name'),
-                'body': comment.get('message').get('body'),
+                'body': fullbody,
             })
         return parsed
 
@@ -108,9 +145,9 @@ class Chat:
             loop.call_later(
                 offset,
                 self._message,
-                f'{commenter}: {body}',
+                f'{body}',
             )
-            print(f'created call for "{commenter}: {body}" in {offset}s ({self.playback_time})')
+            print(f'created call for "{commenter}: {body}" in {offset}s ({message.get("offset")})')
 
     async def handle_data(self):
         while True:
@@ -128,11 +165,6 @@ class Chat:
                 self.playback_time = message.get('data')
             else:
                 print(message)
-
-    async def print_playing(self):
-        while True:
-            await asyncio.sleep(1)
-            #self._message(self.playback_time)
 
     async def get_play_time(self):
         while True:
