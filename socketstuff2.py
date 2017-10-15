@@ -1,6 +1,5 @@
 import asyncio
 import json
-from socketIO_client import SocketIO
 import requests
 from pyyamlconfig import load_config
 from pathlib import Path
@@ -42,21 +41,37 @@ class Chat:
         if channel_emotes is not None:
             self.bttv_emotes.extend(channel_emotes)
 
-    async def _message(self, message: str, message_id: str):
-        self.message_queue[:] = [d for d in self.message_queue if d.get('message_id') != message_id]
-        return message
-
     def start(self):
         self.playback_time_task = self.loop.create_task(self.get_play_time())
         self.loop.create_task(self.get_initial_messages())
         self.get_messages_task = self.loop.create_task(self.get_messages_loop())
 
     def stop(self):
+        self.playback_time = None
         if self.playback_time_task is not None:
             self.playback_time_task.cancel()
         if self.get_messages_task is not None:
             self.get_messages_task.cancel()
         self.messages = SortedListWithKey(key=lambda val: val['offset'])
+
+    async def handle_data(self):
+        while True:
+            data = await self.reader.readline()
+            message = json.loads(data)
+            name = message.get('name')
+            request_id = message.get('request_id')
+            if name == 'core-idle' or request_id == 'core-idle':
+                playing = not message.get('data')
+                if playing:
+                    self.start()
+                else:
+                    self.stop()
+            elif request_id == 'playback-time':
+                self.playback_time = message.get('data')
+            elif request_id == 'title':
+                self.video = message.get('data')
+            else:
+                print(message)
 
     async def get_initial_messages(self):
         while self.playback_time is None:
@@ -85,7 +100,8 @@ class Chat:
         response = requests.get(url, headers=self.headers).json()
         comments = response.get('comments')
         self.cursor = response.get('_next')
-        self.messages.extend(await self.parse_comments(comments))
+        parsed_comments = await self.parse_comments(comments)
+        self.messages.extend(parsed_comments)
         self.last_offset = max([x['offset'] for x in self.messages])
         self.fetching_messages = False
 
@@ -152,25 +168,6 @@ class Chat:
             })
         return parsed
 
-    async def handle_data(self):
-        while True:
-            data = await self.reader.readline()
-            message = json.loads(data)
-            name = message.get('name')
-            request_id = message.get('request_id')
-            if name == 'core-idle' or request_id == 'core-idle':
-                playing = not message.get('data')
-                if playing:
-                    self.start()
-                else:
-                    self.stop()
-            elif request_id == 'playback-time':
-                self.playback_time = message.get('data')
-            elif request_id == 'title':
-                self.video = message.get('data')
-            else:
-                print(message)
-
     async def get_play_time(self):
         while True:
             self.writer.write(b'{ "command": ["get_property", "playback-time"], "request_id": "playback-time" }\n')
@@ -228,7 +225,7 @@ class Chat:
                 pbt = message.get('offset') if self.playback_time is None else self.playback_time
                 offset = message.get('offset') - pbt
                 body = message.get('body')
-                if offset < 0:
+                if offset <= 0:
                     offset = 0
                 if offset > 0.2:
                     await asyncio.sleep(offset)
