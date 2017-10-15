@@ -12,6 +12,8 @@ class Chat:
     def __init__(self, loop):
         self.home = Path.home()
         self.config = load_config(f'{self.home}/.config/twitchchat.yaml')
+        self.web_port = self.config.get('web-port', 5000)
+        self.socket_port = self.config.get('socket-port', 5001)
         self.loop = loop
         self.reader, self.writer = self.loop.run_until_complete(
             asyncio.open_unix_connection(
@@ -19,7 +21,7 @@ class Chat:
             )
         )
         self.setup_web()
-        socket_server = websockets.serve(self.time, '127.0.0.1', 5001)
+        socket_server = websockets.serve(self.time, '127.0.0.1', self.socket_port)
         asyncio.get_event_loop().run_until_complete(socket_server)
         self.writer.write(b'{ "command": ["observe_property", 1, "core-idle"] }\n')
         self.writer.write(b'{ "command": ["get_property", "core-idle"], "request_id": "core-idle" }\n')
@@ -183,7 +185,7 @@ class Chat:
                 </script>
                 <script type="text/javascript">
                     $(document).ready(function() {
-                        var socket = new WebSocket('ws://' + document.domain + ':5001/');
+                        var socket = new WebSocket('ws://' + document.domain + ':''' + str(self.socket_port) + '''/');
 
                         socket.onmessage = function(msg) {
                             $("#chatlog").append('<li class="full-width ">' + msg.data + '</li>');
@@ -234,7 +236,7 @@ class Chat:
     def setup_web(self):
         server = web.Server(self.index)
         self.loop.run_until_complete(
-            self.loop.create_server(server, '127.0.0.1', 5000)
+            self.loop.create_server(server, '127.0.0.1', self.web_port)
         )
 
 if __name__ == '__main__':
