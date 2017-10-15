@@ -5,3 +5,6 @@ flask
 flask_socketio
 socketIO-client
 asyncio
+aiohttp
+websockets
+sortedcontainers

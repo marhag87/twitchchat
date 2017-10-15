@@ -4,6 +4,9 @@ from socketIO_client import SocketIO
 import requests
 from pyyamlconfig import load_config
 from pathlib import Path
+from aiohttp import web
+import websockets
+from sortedcontainers import SortedListWithKey
 
 
 class Chat:
@@ -16,7 +19,9 @@ class Chat:
                 self.config.get('socket'),
             )
         )
-        self.websocket = SocketIO('localhost', 5000)
+        self.setup_web()
+        socket_server = websockets.serve(self.time, '127.0.0.1', 5001)
+        asyncio.get_event_loop().run_until_complete(socket_server)
         self.writer.write(b'{ "command": ["observe_property", 1, "core-idle"] }\n')
         self.writer.write(b'{ "command": ["get_property", "core-idle"], "request_id": "core-idle" }\n')
         self.writer.write(b'{ "command": ["get_property", "title"], "request_id": "title" }\n')
@@ -27,7 +32,7 @@ class Chat:
         self.playback_time = None
         self.cursor = None
         self.fetching_messages = False
-        self.messages = []
+        self.messages = SortedListWithKey(key=lambda val: val['offset'])
         self.message_queue = []
         self.clientid = self.config.get('clientid')
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
@@ -39,16 +44,12 @@ class Chat:
         if channel_emotes is not None:
             self.bttv_emotes.extend(channel_emotes)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.websocket.disconnect()
-
-    def _message(self, message: str, message_id: str):
-        self.websocket.send({'body': message})
+    async def _message(self, message: str, message_id: str):
         self.message_queue[:] = [d for d in self.message_queue if d.get('message_id') != message_id]
+        return message
 
     def start(self):
         self.playback_time_task = self.loop.create_task(self.get_play_time())
-        self.queue_messages_task = self.loop.create_task(self.queue_messages())
         self.loop.create_task(self.get_initial_messages())
         self.get_messages_task = self.loop.create_task(self.get_messages_loop())
 
@@ -73,7 +74,7 @@ class Chat:
             await asyncio.sleep(1)
         while True:
             if self.last_offset - self.playback_time > 10:
-                print(f'last_offset: {self.last_offset}, playback_time: {self.playback_time}, diff: {self.last_offset - self.playback_time}, len: {len(self.message_queue)}')
+                print(f'last_offset: {self.last_offset}, playback_time: {self.playback_time}, diff: {self.last_offset - self.playback_time}, len: {len(self.messages)}')
                 sleeptime = self.last_offset - self.playback_time - 9
                 print(f'sleeping for {sleeptime}s')
                 await asyncio.sleep(sleeptime)
@@ -92,7 +93,6 @@ class Chat:
         self.cursor = response.get('_next')
         self.messages.extend(await self.parse_comments(comments))
         self.last_offset = max([x['offset'] for x in self.messages])
-        await self.queue_messages()
         self.fetching_messages = False
 
     def parse_bttv(self, text):
@@ -158,30 +158,6 @@ class Chat:
             })
         return parsed
 
-    async def queue_messages(self):
-        while self.playback_time is None:
-            await asyncio.sleep(1)
-        while self.messages:
-            message = self.messages.pop()
-            pbt = message.get('offset') if self.playback_time is None else self.playback_time
-            offset = message.get('offset') - pbt
-            body = message.get('body')
-            message_id = message.get('message_id')
-            if offset < 0:
-                offset = 0
-            self.message_queue.append(
-                {
-                    'message_id': message_id,
-                    'event': self.loop.call_later(
-                        offset,
-                        self._message,
-                        f'{body}',
-                        message_id,
-                    ),
-                }
-            )
-            #print(f'created call for "{commenter}: {body}" in {offset}s ({message.get("offset")})')
-
     async def handle_data(self):
         while True:
             data = await self.reader.readline()
@@ -205,6 +181,68 @@ class Chat:
         while True:
             self.writer.write(b'{ "command": ["get_property", "playback-time"], "request_id": "playback-time" }\n')
             await asyncio.sleep(1)
+
+    async def index(self, request):
+        return web.Response(
+            content_type='text/html',
+            text='''<!doctype html>
+                <script type="text/javascript" src="http://code.jquery.com/jquery-1.11.1.min.js"></script>
+                <script type="text/javascript">
+                !function(t){var i=t(window);t.fn.visible=function(t,e,o){if(!(this.length<1)){var r=this.length>1?this.eq(0):this,n=r.get(0),f=i.width(),h=i.height(),o=o?o:"both",l=e===!0?n.offsetWidth*n.offsetHeight:!0;if("function"==typeof n.getBoundingClientRect){var g=n.getBoundingClientRect(),u=g.top>=0&&g.top<h,s=g.bottom>0&&g.bottom<=h,c=g.left>=0&&g.left<f,a=g.right>0&&g.right<=f,v=t?u||s:u&&s,b=t?c||a:c&&a;if("both"===o)return l&&v&&b;if("vertical"===o)return l&&v;if("horizontal"===o)return l&&b}else{var d=i.scrollTop(),p=d+h,w=i.scrollLeft(),m=w+f,y=r.offset(),z=y.top,B=z+r.height(),C=y.left,R=C+r.width(),j=t===!0?B:z,q=t===!0?z:B,H=t===!0?R:C,L=t===!0?C:R;if("both"===o)return!!l&&p>=q&&j>=d&&m>=L&&H>=w;if("vertical"===o)return!!l&&p>=q&&j>=d;if("horizontal"===o)return!!l&&m>=L&&H>=w}}}}(jQuery);
+                </script>
+                <script type="text/javascript">
+                    $(document).ready(function() {
+                        var socket = new WebSocket('ws://' + document.domain + ':5001/');
+
+                        socket.onmessage = function(msg) {
+                            $("#chatlog").append('<li class="full-width ">' + msg.data + '</li>');
+                            while ($('#chatlog li').last().visible() === false) {
+                                $('#chatlog li').first().remove();
+                            }
+                        };
+                    });
+                </script>
+                <link rel="stylesheet" href="https://player.twitch.tv/css/player.css">
+                <link rel="stylesheet" href="https://web-cdn.ttvnw.net/styles/application-0fa6ef9268e043c023dfea86aeff7a02.css">
+                <link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv.css?v=7.0.29">
+                <link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv-dark.css?v=7.0.29">
+                <link rel="stylesheet" href="https://cdn.betterttv.net/css/betterttv-hide-recommended-channels.css?v=7.0.29">
+                <link rel="stylesheet" href="https://web-cdn.ttvnw.net/styles/twilight/core-4a4a70c7c2b9d9ebcbcad1b8c739ad36.css">
+                <style>
+                    body {
+                        overflow:hidden;
+                    }
+                </style>
+                <title>Twitch chat</title>
+                <div class=page>
+                    <ul id="chatlog" class="full-width align-items-end flex" style="min-height: 0px;"></ul>
+                </div>''',
+        )
+
+    async def producer(self):
+        while self.playback_time is None:
+            await asyncio.sleep(1)
+        while self.messages:
+            return self.messages.pop(0)
+
+    async def time(self, websocket, path):
+        while True:
+            message = await self.producer()
+            if message is not None:
+                pbt = message.get('offset') if self.playback_time is None else self.playback_time
+                offset = message.get('offset') - pbt
+                body = message.get('body')
+                if offset < 0:
+                    offset = 0
+                if offset > 0.2:
+                    await asyncio.sleep(offset)
+                await websocket.send(body)
+
+    def setup_web(self):
+        server = web.Server(self.index)
+        self.loop.run_until_complete(
+            self.loop.create_server(server, '127.0.0.1', 5000)
+        )
 
 if __name__ == '__main__':
     async_loop = asyncio.get_event_loop()
