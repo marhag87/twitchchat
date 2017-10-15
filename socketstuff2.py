@@ -28,12 +28,10 @@ class Chat:
         self.loop.create_task(self.handle_data())
         self.playback_time_task = None
         self.get_messages_task = None
-        self.queue_messages_task = None
         self.playback_time = None
         self.cursor = None
         self.fetching_messages = False
         self.messages = SortedListWithKey(key=lambda val: val['offset'])
-        self.message_queue = []
         self.clientid = self.config.get('clientid')
         self.headers = {'Client-ID': self.clientid, 'Accept': 'application/vnd.twitchtv.v5+json'}
         self.video = None
@@ -58,11 +56,7 @@ class Chat:
             self.playback_time_task.cancel()
         if self.get_messages_task is not None:
             self.get_messages_task.cancel()
-        if self.queue_messages_task is not None:
-            self.queue_messages_task.cancel()
-        for item in self.message_queue:
-            item.get('event').cancel()
-        self.message_queue = []
+        self.messages = SortedListWithKey(key=lambda val: val['offset'])
 
     async def get_initial_messages(self):
         while self.playback_time is None:
@@ -228,7 +222,9 @@ class Chat:
     async def time(self, websocket, path):
         while True:
             message = await self.producer()
-            if message is not None:
+            if message is None:
+                await asyncio.sleep(1)
+            else:
                 pbt = message.get('offset') if self.playback_time is None else self.playback_time
                 offset = message.get('offset') - pbt
                 body = message.get('body')
