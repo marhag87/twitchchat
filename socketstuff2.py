@@ -6,6 +6,7 @@ from pathlib import Path
 from aiohttp import web
 import websockets
 from sortedcontainers import SortedListWithKey
+import re
 
 
 class Chat:
@@ -110,16 +111,16 @@ class Chat:
     def parse_bttv(self, text):
         for emote in self.bttv_emotes:
             code = emote.get('code')
-            text = text.replace(
-                code,
-                f'<img src="">'
+            text = re.sub(
+                rf'\b{re.escape(code)}\b',
                 f'''<div class="tw-tooltip-wrapper inline" data-a-target="emote-name">
                         <img class="chat-line__message--emote" src="https://cdn.betterttv.net/emote/{emote.get("id")}/1x">
                         <div class="tw-tooltip tw-tooltip--up tw-tooltip--align-center" data-a-target="tw-tooltip-label" style="margin-bottom: 0.9rem;">
                             {code}
                         </div>
                     </div>
-                '''
+                ''',
+                text,
             )
         return text
 
@@ -238,6 +239,7 @@ class Chat:
         self.loop.run_until_complete(
             self.loop.create_server(server, '127.0.0.1', self.web_port)
         )
+
 
 if __name__ == '__main__':
     async_loop = asyncio.get_event_loop()
